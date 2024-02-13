@@ -1,0 +1,24 @@
+{
+    "name": "gantry-motion/ussd-monkey",
+    "description": "Easily build USSD Applications",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Joe Ssekono",
+            "email": "ssekono@gmail.com"
+        },
+        {
+            "name": "Hamidouh Semitala",
+            "email": "hsemix@gmail.com"
+        }
+    ],
+    "require": {
+        "predis/predis": "^1.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "GantryMotion\\USSDMonkey\\": "src/"
+        }
+    }
+}
