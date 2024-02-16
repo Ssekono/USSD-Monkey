@@ -53,6 +53,16 @@ The package comes with default configuration settings, but you can override them
 
 You can override these settings by providing a custom configuration array when instantiating the USSD Monkey class.
 
+To view the configuration that USSD Monkey will use, you can utilize the `configInfo()` function provided by the package. Here's how you can use it:
+
+```php
+$ussd = new USSDMonkey($config);
+$current_config = $ussd->configInfo();
+echo json_encode($current_config);
+```
+
+This code will output a JSON representation of the current configuration settings that USSD Monkey will use for your USSD application. You can then inspect these settings to ensure they align with your requirements.
+
 #### Example
 
 Here's an example of how you might instantiate the USSD Monkey class with custom configuration:
