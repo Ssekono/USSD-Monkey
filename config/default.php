@@ -1,6 +1,7 @@
 <?php
 
 $config = [
+    "environment" => "production",
     "input_format" => "chained",
     "output_format" => "conend",
     "enable_chained_input" => true,

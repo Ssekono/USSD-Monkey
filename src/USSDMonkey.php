@@ -6,25 +6,38 @@ use Predis\Client;
 
 class USSDMonkey
 {
-    public $sessionId;
-    public $serviceCode;
-    public $phoneNumber;
-    public $requestString;
+    private $sessionId;
+    private $serviceCode;
+    private $phoneNumber;
+    private $requestString;
 
-    protected $ussdConfig;
-    protected $ussdMenu;
+    private $ussdMenu;
+    private $ussdConfig;
+    private $customClassNamespace;
 
-    protected $redis;
+    private $redis;
 
-    public function __construct(array $config = [])
+    public function __construct(array $customConfig = [])
     {
-        // Load configuration
+        // Load default configurations
         $defaultConfig = include(__DIR__ . '/../config/default.php');
-        $this->ussdConfig = array_merge($defaultConfig, $config);
+        // Validate custom configurations
+        $this->validateConfig($customConfig);
+        // Merge with valdated custom configurations
+        $this->ussdConfig = array_merge($defaultConfig, $customConfig);
 
         // Load Menu
         if (isset($this->ussdConfig['ussd_menu_file'])) {
-            $this->loadJsonConfig($this->ussdConfig['ussd_menu_file']);
+            $this->ussdMenu = $this->loadJsonMenu($this->ussdConfig['ussd_menu_file']);
+        } else {
+            throw new \InvalidArgumentException("USSD Menu file path is not defined");
+        }
+
+        // Get Custom Class where ussd methods are defined
+        if (isset($this->ussdConfig['custom_class_namespace'])) {
+            $this->customClassNamespace = $this->ussdConfig['custom_class_namespace'];
+        } else {
+            throw new \Exception("Custom Class Namespace is not defined");
         }
 
         // Set Redis
@@ -37,22 +50,22 @@ class USSDMonkey
     }
 
 
-    protected function loadJsonConfig(string $jsonConfigFile)
+    protected function loadJsonMenu(string $jsonMenuFile)
     {
-        if (file_exists($jsonConfigFile)) {
-            $userConfig = json_decode(file_get_contents($jsonConfigFile), true);
-            if ($userConfig !== null) {
-                $this->ussdConfig = $userConfig;
+        if (file_exists($jsonMenuFile)) {
+            $userMenu = json_decode(file_get_contents($jsonMenuFile), true);
+            if ($userMenu !== null) {
+                return $userMenu;
             } else {
-                throw new \RuntimeException("Invalid JSON format in the provided USSD Menu file: $jsonConfigFile");
+                throw new \RuntimeException("Invalid JSON format in the provided USSD Menu file: $jsonMenuFile");
             }
         } else {
-            throw new \InvalidArgumentException("USSD Menu file not found: $jsonConfigFile");
+            throw new \InvalidArgumentException("USSD Menu file not found: $jsonMenuFile");
         }
     }
 
 
-    public function connect(array $params)
+    public function push(array $params, string $default_menu = 'default_menu')
     {
         try {
             $this->sessionId = $params[$this->ussdConfig['request_variables']['session_id']];
@@ -69,7 +82,6 @@ class USSDMonkey
 
             $continue_session = true;
             // Get menu type
-            $default_menu = $this->userMenuSelector($this->phoneNumber);
             if (empty($pattern)) {
                 $user_menu = $default_menu;
                 $menu_title = $this->ussdMenu[$user_menu]['menu_title'];
@@ -91,9 +103,27 @@ class USSDMonkey
                 // Compile data to display
                 if ($user_menu['display'] == "_EXECUTE_") {
                     if (in_array($user_menu['execute_func'], $this->ussdConfig['disabled_func'])) {
-                        $this->render("Service is not available.", false);
+                        $this->render("Service is not available at the moment.", false);
                     }
-                    $display = call_user_func(array($this, $user_menu['execute_func']), $pattern);
+
+                    // Check if the method exists
+                    if (method_exists($this->customClassNamespace, $user_menu['execute_func'])) {
+
+                        // Append request parameters to pattern
+                        $core = [];
+                        $core[$this->ussdConfig['request_variables']['session_id']] = $this->sessionId;
+                        $core[$this->ussdConfig['request_variables']['service_code']] = $this->serviceCode;
+                        $core[$this->ussdConfig['request_variables']['phone_number']] = $this->phoneNumber;
+                        $pattern[] = $core;
+
+                        // If it exists, create an instance of the class
+                        $object = new $this->customClassNamespace();
+                        // Call the method dynamically
+                        $display = call_user_func(array($object, $user_menu['execute_func']), $pattern);
+                    } else {
+                        // Handle if the method doesn't exist
+                        $this->render("Service is not defined.", false);
+                    }
                 } else {
                     $display = $user_menu['display'];
                 }
@@ -111,20 +141,27 @@ class USSDMonkey
                 if (!isset($user_menu['options'])) {
                     $continue_session = false;
                     // Delete session data
-                    $this->cache('delete', 'ussd_session_' . $this->sessionId);
+                    $this->redis->del('ussd_session_' . $this->sessionId);
                 }
             }
             $this->render($response, $continue_session);
         } catch (\Exception $e) {
             // Delete session data
-            $this->cache('delete', 'ussd_session_' . $this->sessionId);
-
-            $menu_title = $this->ussdConfig['error_title'];
-            $display = $this->ussdConfig['error_message'];
-            $menu_items_displayed = null;
-            $response = $this->menu_builder($display, $menu_title, $menu_items_displayed);
-            $continue_session = false;
-            $this->render($response, $continue_session);
+            $this->redis->del('ussd_session_' . $this->sessionId);
+            // Display error
+            if ($this->ussdConfig['environment'] == 'production') {
+                $menu_title = $this->ussdConfig['error_title'];
+                $display = $this->ussdConfig['error_message'];
+                $menu_items_displayed = null;
+                $response = $this->menu_builder($display, $menu_title, $menu_items_displayed);
+                $continue_session = false;
+                $this->render($response, $continue_session);
+            } elseif ($this->ussdConfig['environment'] == 'development') {
+                print_r($e);
+                exit;
+            } else {
+                echo "Error cannot be displayed; Unsupported environment (" . $this->ussdConfig['environment'] . ")";
+            }
         }
     }
 
@@ -133,8 +170,10 @@ class USSDMonkey
     public function pattern_builder(string $string, string $session_id)
     {
         $ussd_session = array();
-        // Fetch cached session data
-        if ($result = $this->cache('get', 'ussd_session_' . $session_id)) {
+
+        $result = json_decode($this->redis->get('ussd_session_' . $this->sessionId), true);
+        if (!is_null($result)) {
+            $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
             $ussd_session = $result;
         }
 
@@ -168,7 +207,8 @@ class USSDMonkey
         }
 
         // Cache pattern to session data
-        $this->cache('set', 'ussd_session_' . $session_id, $ussd_session);
+        $this->redis->set('ussd_session_' . $session_id, json_encode($ussd_session));
+        $this->redis->expire('ussd_session_' . $session_id, 20); // expire in 20 seconds
         return $ussd_session['pattern'];
     }
 
@@ -180,7 +220,8 @@ class USSDMonkey
         // Limit number of displayed menu items
         if (!is_null($menu_items_displayed) && $menu_items_displayed > 0) {
 
-            if ($ussd_session = $this->cache('get', 'ussd_session_' . $this->sessionId)) {
+            if ($ussd_session = json_decode($this->redis->get('ussd_session_' . $this->sessionId), true)) {
+                $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
                 if (isset($ussd_session['nav'])) {
                     print_r($ussd_session['nav']);
                 }
@@ -195,7 +236,8 @@ class USSDMonkey
         }
 
         // Add a back navigation menu item
-        if ($ussd_session = $this->cache('get', 'ussd_session_' . $this->sessionId)) {
+        if ($ussd_session = json_decode($this->redis->get('ussd_session_' . $this->sessionId), true)) {
+            $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
             if (isset($ussd_session['pattern']) && !empty($ussd_session['pattern'])) {
                 $menu_items[] = $this->ussdConfig['nav_prev'] . '. Back';
             }
@@ -238,15 +280,55 @@ class USSDMonkey
         exit;
     }
 
-
-    public function cache(string $action, string $key, $value = null)
+    public function validateConfig(array $customConfig)
     {
-        if ($action == 'set') {
-            return $this->redis->set($key, $value);
-        } elseif ($action == 'delete') {
-            return $this->redis->delete($key);
-        } else {
-            return $this->redis->get($key);
+        if (isset($customConfig['environment'])) {
+            if (!in_array($customConfig['environment'], ['development', 'production'])) {
+                throw new \Exception("Invalid configuration value for 'environment'. Expected 'development' or 'production'.");
+            }
         }
+
+        if (isset($customConfig['output_format'])) {
+            if (!in_array($customConfig['output_format'], ['conend', 'json'])) {
+                throw new \Exception("Invalid configuration value for 'output_format'. Expected 'conend' or 'json'.");
+            }
+        }
+
+        if (isset($customConfig['enable_chained_input'])) {
+            if (!is_bool($customConfig['enable_chained_input'])) {
+                throw new \Exception("Invalid configuration value for 'enable_chained_input'. Expected a boolean 'true' or 'false'.");
+            }
+        }
+
+        if (isset($customConfig['enable_back_and_forth_menu_nav'])) {
+            if (!is_bool($customConfig['enable_back_and_forth_menu_nav'])) {
+                throw new \Exception("Invalid configuration value for 'enable_back_and_forth_menu_nav'. Expected a boolean 'true' or 'false'.");
+            }
+        }
+
+        if (isset($customConfig['chars_per_line'])) {
+            if (!preg_match('/^(\d+|NULL)$/', $customConfig['chars_per_line'])) {
+                throw new \Exception("Invalid configuration value for 'chars_per_line'. Expected a boolean positive integer or 'NULL'.");
+            }
+        }
+
+        if (isset($customConfig['menu_items_separator'])) {
+            if (!in_array($customConfig['menu_items_separator'], ['|', ','])) {
+                throw new \Exception("Invalid configuration value for 'menu_items_separator'. Expected '|' or ','.");
+            }
+        }
+
+        if (isset($customConfig['sanitizePhoneNumber'])) {
+            if (!is_bool($customConfig['sanitizePhoneNumber'])) {
+                throw new \Exception("Invalid configuration value for 'sanitizePhoneNumber'. Expected a boolean 'true' or 'false'.");
+            }
+        }
+
+        return true;
+    }
+
+    public function configInfo()
+    {
+        return $this->ussdConfig;
     }
 }
