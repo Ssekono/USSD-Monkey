@@ -20,5 +20,7 @@
         "psr-4": {
             "GantryMotion\\USSDMonkey\\": "src/"
         }
-    }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
