@@ -38,18 +38,18 @@ The package comes with default configuration settings, but you can override them
 - `environment`: Set the environment to "production" or "development".
 - `input_format`: Define the input format. Accepted value: "chained".
 - `output_format`: Determine the output format. Accepted values: "conend" or "json".
-- `enable_chained_input`: Enable or disable chained input if supported by the USSD gateway provider.
-- `enable_back_and_forth_menu_nav`: Enable or disable back and forth menu navigation.
+- `enable_chained_input`: Enable or disable chained input if supported by the USSD gateway provider. Accepted values: "true" or "false".
+- `enable_back_and_forth_menu_nav`: Enable or disable back and forth menu navigation. Accepted values: "true" or "false".
 - `chars_per_line`: Specify the number of characters per line.
 - `menu_items_separator`: Define the separator for menu items (| or ,).
 - `nav_next`: Define the navigation string for moving to the next menu.
 - `nav_prev`: Define the navigation string for moving to the previous menu.
-- `sanitizePhoneNumber`: Enable or disable phone number sanitization.
+- `sanitizePhoneNumber`: Enable or disable phone number sanitization. Accepted values: "true" or "false".
 - `error_title`: Set the title for error messages.
 - `error_message`: Set the default error message.
 - `disabled_func`: List any disabled functions from your project to be marked as suspended during USSD usage.
 - `request_variables`: Map request variables to their corresponding names as sent by the USSD Gateway provider (session id, service code, phone number, request string).
-- `redis`: Configuration settings for Redis, if used.
+- `redis`: Configuration settings for Redis.
 
 You can override these settings by providing a custom configuration array when instantiating the USSD Monkey class.
 
@@ -152,7 +152,8 @@ class USSD
         foreach ($titles as $key => $value) {
             $title_list[] = $key . ' ' . $value;
         }
-        $display = implode('|', $title_list);
+        $display = "Select Title" . PHP_EOL;
+        $display += implode('|', $title_list);
         return $display;
     }
 
