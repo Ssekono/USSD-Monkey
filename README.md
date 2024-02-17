@@ -68,15 +68,122 @@ This code will output a JSON representation of the current configuration setting
 Here's an example of how you might instantiate the USSD Monkey class with custom configuration:
 
 ```php
+use GantryMotion\USSDMonkey\USSDMonkey;
+
 $config = [
-    'environment' => 'development',
-    'ussd_menu_file' => ROOTPATH . 'ussdMenu.json',
+    'ussd_menu_file' => 'path/to/ussdMenu.json',
     'custom_class_namespace' => 'App\Controllers\USSD',
     // Override other configuration options as needed
 ];
 
+$params = $_POST;
 $ussd = new USSDMonkey($config);
-$ussd->push($params, $menu);
+$ussd->push($params, 'default_menu');
 ```
+
+Below is an example of the `ussdMenu.json` file structure:
+
+```json
+{
+    "default_menu": {
+        "menu_title": "USSD Monkey",
+        "display_menu": "1. Say Hello |2. Say Goodbye |3. Say Good Night",
+        "options": {
+            "1": {
+                "display": "Enter a name",
+                "options": {
+                    "display": "_EXECUTE_",
+                    "execute_func": "say_hello"
+                }
+            },
+            "2": {
+                "display": "Enter a name",
+                "options": {
+                    "display": "_EXECUTE_",
+                    "execute_func": "get_people_titles",
+                    "options": {
+                        "display": "_EXECUTE_",
+                        "execute_func": "say_goodbye"
+                    }
+                }
+            },
+            "3": {
+                "display": "Enter a name",
+                "options": {
+                    "display": "1. Wish sweet dream |2. Let bedbugs not bite",
+                    "options": {
+                        "1": {
+                            "display": "_EXECUTE_",
+                            "execute_func": "say_goodnight_sweet_dreams"
+                        },
+                        "2": {
+                            "display": "_EXECUTE_",
+                            "execute_func": "say_goodnight_bedbugs_dont_bite"
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+This JSON structure defines the menu options for your USSD application. Each menu item has a display label and, optionally, an associated action to execute (`_EXECUTE_`). The structure supports nested options for creating multi-level menus. Ensure your `ussdMenu.json` file adheres to this format to work correctly with USSD Monkey.
+
+Below is an example of the `USSD` PHP class containing custom methods for your USSD application:
+
+```php
+namespace App\Controllers;
+
+class USSD
+{
+    public function say_hello($data)
+    {
+        $name = $data[0];
+        $display = "Hello " . $name;
+        return $display;
+    }
+
+    public function get_people_titles($data)
+    {
+        $titles = ["1" => "Mr", "2" => "Mrs", "3" => "Ms", "4" => "Dr"];
+
+        $title_list = [];
+        foreach ($titles as $key => $value) {
+            $title_list[] = $key . ' ' . $value;
+        }
+        $display = implode('|', $title_list);
+        return $display;
+    }
+
+    public function say_goodbye($data)
+    {
+        $name = $data[0];
+        $index = $data[1];
+
+        $titles = ["1" => "Mr", "2" => "Mrs", "3" => "Ms", "4" => "Dr"];
+
+        $display = "Goodbye " . $titles[$index] . " " . $name;
+        return $display;
+    }
+
+    public function say_goodnight_sweet_dreams($data)
+    {
+        $name = $data[0];
+        $display = "Good night " . $name . ", and sweet dreams";
+        return $display;
+    }
+
+    public function say_goodnight_bedbugs_dont_bite($data)
+    {
+        $name = $data[0];
+        $display = "Good night " . $name . ", and don't let the bedbugs bite";
+        return $display;
+    }
+}
+```
+
+This `USSD` class contains methods that correspond to the actions defined in your `ussdMenu.json` file. These methods process the data received from the USSD menu and return appropriate responses. Ensure that the namespace and class name match the ones specified in your configuration.
+
 
 That's it! You're now ready to use the USSD Monkey package to build your USSD applications.
