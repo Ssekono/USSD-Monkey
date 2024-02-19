@@ -1,6 +1,6 @@
 ### USSD Monkey
 
-The USSD Monkey package is designed to help developers quickly build USSD applications by defining their menu flow in a JSON file. This README.md file provides documentation on how to use the package effectively.
+The USSD Monkey package is designed to help developers quickly build USSD applications by defining their menu flow in a JSON file. This README.md file provides documentation on how to use the package effectively. This package uses Redis to temporarily store session information.
 
 #### Installation
 
@@ -87,7 +87,7 @@ Below is an example of the `ussdMenu.json` file structure:
 {
     "default_menu": {
         "menu_title": "USSD Monkey",
-        "display_menu": "1. Say Hello |2. Say Goodbye |3. Say Good Night",
+        "display": "1. Say Hello |2. Say Goodbye |3. Say Good Night",
         "options": {
             "1": {
                 "display": "Enter a name",
@@ -139,7 +139,7 @@ class USSD
 {
     public function say_hello($data)
     {
-        $name = $data[0];
+        $name = $data[1];
         $display = "Hello " . $name;
         return $display;
     }
@@ -153,14 +153,14 @@ class USSD
             $title_list[] = $key . ' ' . $value;
         }
         $display = "Select Title" . PHP_EOL;
-        $display += implode('|', $title_list);
+        $display .= implode('|', $title_list);
         return $display;
     }
 
     public function say_goodbye($data)
     {
-        $name = $data[0];
-        $index = $data[1];
+        $name = $data[1];
+        $index = $data[2];
 
         $titles = ["1" => "Mr", "2" => "Mrs", "3" => "Ms", "4" => "Dr"];
 
@@ -170,14 +170,14 @@ class USSD
 
     public function say_goodnight_sweet_dreams($data)
     {
-        $name = $data[0];
+        $name = $data[1];
         $display = "Good night " . $name . ", and sweet dreams";
         return $display;
     }
 
     public function say_goodnight_bedbugs_dont_bite($data)
     {
-        $name = $data[0];
+        $name = $data[1];
         $display = "Good night " . $name . ", and don't let the bedbugs bite";
         return $display;
     }
