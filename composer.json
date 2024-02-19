@@ -10,7 +10,7 @@
         },
         {
             "name": "Hamidouh Semitala",
-            "email": "hsemix@gmail.com"
+            "email": "semix.hamidouh@gmail.com"
         }
     ],
     "require": {
@@ -20,5 +20,7 @@
         "psr-4": {
             "GantryMotion\\USSDMonkey\\": "src/"
         }
-    }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
