@@ -64,6 +64,29 @@ class USSDMonkey
         }
     }
 
+    protected function getSameMenuEndpoint($user_menu, ?string $ussd_option = null)
+    {
+        if ($this->redis->get('ussd_session_same_endpoint_' . $this->sessionId)) {
+            $cached = json_decode($this->redis->get('ussd_session_same_endpoint_' . $this->sessionId), true);
+
+            $user_menu['options'][$cached['menu_option']]['display'] = "_EXECUTE_";
+            $user_menu['options'][$cached['menu_option']]['execute_func'] = $cached['method'];
+            $user_menu['options'][$cached['menu_option']]['uses_same_method'] = true;
+
+            $user_menu = $user_menu['options'][$cached['menu_option']];
+
+        } else {
+            // $user_menu = $user_menu['options'] ?? null;
+
+            if ($ussd_option) {
+                $user_menu = $user_menu['options'][$ussd_option] ?? null;
+            } else {
+                $user_menu = $user_menu['options'] ?? null;
+            }
+        }
+
+        return $user_menu;
+    }
 
     public function push(array $params, string $default_menu = 'default_menu')
     {
@@ -94,27 +117,14 @@ class USSDMonkey
                 // Navigate through the menu hierarchy
                 foreach ($pattern as $ussd_option) {
                     if (isset($user_menu['options'][$ussd_option])) {
-                        $user_menu = $user_menu['options'][$ussd_option];
-
+                        // $user_menu = $user_menu['options'][$ussd_option];
+                        $user_menu = $this->getSameMenuEndpoint($user_menu, $ussd_option);
                         if ($user_menu['options']['uses_same_method'] ??= false) {
                             $this->redis->set('ussd_session_same_endpoint_' . $this->sessionId, json_encode(['menu_option' => $ussd_option, 'method' => $user_menu['options']['execute_func']]));
                         }
+ 
                     } else {
-                        // $user_menu = $user_menu['options'] ?? null;
-
-                        if ($this->redis->get('ussd_session_same_endpoint_' . $this->sessionId)) {
-                            $cached = json_decode($this->redis->get('ussd_session_same_endpoint_' . $this->sessionId), true);
-
-                            $user_menu['options'][$cached['menu_option']]['display'] = "_EXECUTE_";
-                            $user_menu['options'][$cached['menu_option']]['execute_func'] = $cached['method'];
-                            $user_menu['options'][$cached['menu_option']]['uses_same_method'] = true;
-
-                            $user_menu = $user_menu['options'][$cached['menu_option']];
-
-                        } else {
-                            $user_menu = $user_menu['options'] ?? null;
-                        }
-                        
+                        $user_menu = $this->getSameMenuEndpoint($user_menu);
                     }
                 }
 
@@ -142,6 +152,11 @@ class USSDMonkey
                                 if (!is_object($object)) {
                                     $object = new $this->customClassNamespace();
                                 }
+
+                                if ($user_menu['uses_same_method'] ??= false) {
+                                    $this->redis->set('ussd_session_same_endpoint_' . $this->sessionId, json_encode(['menu_option' => $ussd_option, 'method' => $user_menu['execute_func']]));
+                                }
+
                                 // Call the method dynamically
                                 $display = call_user_func(array($object, $user_menu['execute_func']), $pattern);
                             } else {
