@@ -110,11 +110,9 @@ class USSDMonkey
                             $user_menu['options'][$cached['menu_option']]['uses_same_method'] = true;
 
                             $user_menu = $user_menu['options'][$cached['menu_option']];
-
                         } else {
                             $user_menu = $user_menu['options'] ?? null;
                         }
-                        
                     }
                 }
 
@@ -178,7 +176,6 @@ class USSDMonkey
                     // Delete session data
                     $this->redis->del('ussd_session_' . $this->sessionId);
                 }
-                
             }
             $this->render($response, $continue_session);
         } catch (\Exception $e) {
@@ -213,7 +210,7 @@ class USSDMonkey
                 $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
                 $ussd_session = $result;
             }
-        }        
+        }
 
         if (!isset($ussd_session['pattern'])) {
             $ussd_session['pattern'] = [];
@@ -293,28 +290,86 @@ class USSDMonkey
         return $response;
     }
 
+    /**
+     * Outputs the USSD response to the user and terminates script execution.
+     *
+     * @param string $response The message to display to the user.
+     * @param bool $continue Whether to continue the USSD session (true) or end it (false).
+     * @return void This method will terminate script execution with exit.
+     *
+     * @note This method will terminate script execution using exit.
+     */
     public function render(string $response, bool $continue = true)
     {
-        // Remove nav back option if continue is false
+        // Remove nav back option and any leading/trailing whitespace or separator if continue is false
         if (!$continue) {
-            $response = str_replace($this->ussdConfig['nav_prev'] . '. Back', '', $response);
+            $separator = preg_quote($this->ussdConfig['menu_items_separator'], '/');
+            $backOption = preg_quote($this->ussdConfig['nav_prev'] . '. Back', '/');
+            $pattern = "/(^|\s|{$separator}+){$backOption}(\s*|$)/m";
+            $response = preg_replace($pattern, '', $response);
+            $response = preg_replace("/\n{2,}/", "\n", $response); // Remove extra newlines
+            $response = trim($response);
         }
-
-        if ($this->ussdConfig['output_format'] == "conend") {
-            if ($continue) {
-                $response = 'CON ' . $response;
+        // Render response based on the specified adaptor or output format
+        if (isset($this->ussdConfig['adaptor']) && !is_null($this->ussdConfig['adaptor'])) {
+            $adaptor = $this->ussdConfig['adaptor'];
+            if ($adaptor == 'AfricasTalking') {
+                $response = $continue ? 'CON ' . $response : 'END ' . $response;
+                header("Content-type: text/plain");
+            } elseif ($adaptor == 'TrueAfrica') {
+                $response_xml  = '<?xml version="1.0" encoding="utf-8"?>';
+                $response_xml .= '<methodCall>';
+                $response_xml .= '<methodName>USSD.' . ($continue ? 'CONT' : 'END') . '</methodName>';
+                $response_xml .= '<params>';
+                $response_xml .= '<param>';
+                $response_xml .= '<value>';
+                $response_xml .= '<struct>';
+                if ($continue) {
+                    $response_xml .= '<member>';
+                    $response_xml .= '<name>response</name>';
+                    $response_xml .= '<value><string>' . $response . '</string></value>';
+                    $response_xml .= '</member>';
+                }
+                $response_xml .= '<member>';
+                $response_xml .= '<name>session</name>';
+                $response_xml .= '<value><string>' . $this->sessionId . '</string></value>';
+                $response_xml .= '</member>';
+                $response_xml .= '</struct>';
+                $response_xml .= '</value>';
+                $response_xml .= '</param>';
+                $response_xml .= '</params>';
+                $response_xml .= '</methodCall>';
+                header("Content-type: text/xml");
+            } elseif ($adaptor == 'DMark') {
+                $render_response = [
+                    'responseString' => urlencode($response),
+                    'action' => $continue ? 'request' : 'end'
+                ];
+                $response = json_encode($render_response);
+                header("Content-type: application/json");
+            } elseif ($adaptor == 'UConnect') {
+                $render_response = [
+                    'response_string' => $response,
+                    'action' => $continue ? 'request' : 'end'
+                ];
+                $response = json_encode($render_response);
+                header("Content-type: application/json");
             } else {
-                $response = 'END ' . $response;
+                throw new \Exception("Unsupported adaptor (" . $adaptor . ")");
             }
-        } elseif ($this->ussdConfig['output_format'] == "json") {
-            $render_response = array(
-                'response_string' => $response,
-                'action' => $continue == true ? 'request' : 'end'
-            );
-            $response = json_encode($render_response);
+        } else {
+            if ($this->ussdConfig['output_format'] == "conend") {
+                $response = $continue ? 'CON ' . $response : 'END ' . $response;
+                header("Content-type: text/plain");
+            } elseif ($this->ussdConfig['output_format'] == "json") {
+                $render_response = [
+                    'response_string' => $response,
+                    'action' => $continue ? 'request' : 'end'
+                ];
+                $response = json_encode($render_response);
+                header("Content-type: application/json");
+            }
         }
-        // Send response back to user
-        header("Content-type: text/plain");
         echo $response;
         exit;
     }
@@ -364,6 +419,90 @@ class USSDMonkey
         }
 
         return true;
+    }
+
+    public function get_request_params($adaptor = null)
+    {
+        if (is_null($adaptor)) {
+            $adaptor = $this->ussdConfig['adaptor'] ?? 'default';
+        }
+
+        if ($adaptor == 'default') {
+            $params = $_POST;
+            $params = [
+                'sessionId' => $params[$this->ussdConfig['request_variables']['session_id']],
+                'serviceCode' => $params[$this->ussdConfig['request_variables']['service_code']],
+                'phoneNumber' => $params[$this->ussdConfig['request_variables']['phone_number']],
+                'text' => $params[$this->ussdConfig['request_variables']['request_string']]
+            ];
+        } elseif ($adaptor == 'AfricasTalking') {
+            $data = $_POST;
+            $params = [
+                'sessionId' => $data['sessionId'],
+                'serviceCode' => $data['serviceCode'],
+                'phoneNumber' => $data['phoneNumber'],
+                'text' => $data['text']
+            ];
+        } elseif ($adaptor == 'TrueAfrica') {
+            $xmlString = file_get_contents('php://input');
+            $xml = simplexml_load_string($xmlString);
+
+            // Navigate to <struct>
+            $struct = $xml->params->param->value->struct;
+            $params = [];
+
+            // Extract values
+            foreach ($struct->member as $member) {
+                $name = (string)$member->name;
+                $value = (string)$member->value->string;
+                if ($name === 'msisdn') {
+                    $params['phoneNumber'] = $value;
+                } elseif ($name === 'shortcode') {
+                    // Remove trailing '#' if present
+                    $shortcode_clean = rtrim($value, '#');
+                    $parts = explode('*', $shortcode_clean);
+
+                    // Extract shortcode: first two segments, re-add leading '*'
+                    if (isset($parts[1]) && isset($parts[2])) {
+                        $params['serviceCode'] = '*' . $parts[1] . '*' . $parts[2];
+                    } else {
+                        $params['serviceCode'] = $shortcode_clean;
+                    }
+
+                    // Extract text: everything after the second '*'
+                    $params['text'] = '';
+                    if (count($parts) > 3) {
+                        $params['text'] = implode('*', array_slice($parts, 3));
+                    }
+                } elseif ($name === 'session') {
+                    $params['sessionId'] = $value;
+                }
+            }
+        } elseif ($adaptor == 'DMark') {
+            // $data = file_get_contents('php://input');
+            // $params = json_decode($data, TRUE);
+            // $data = $_POST;
+            $data = $_GET;
+            $params = [
+                'sessionId' => $data['transactionID'],
+                'serviceCode' => $data['ussdServiceCode'],
+                'phoneNumber' => $data['msisdn'],
+                'text' => $data['ussdRequestString']
+            ];
+        } elseif ($adaptor == 'UConnect') {
+            // $data = file_get_contents('php://input');
+            // $data = json_decode($data, TRUE);
+            $data = $_POST;
+            $params = [
+                'sessionId' => $data['session_id'],
+                'serviceCode' => '*260#',
+                'phoneNumber' => $data['phone_number'],
+                'text' => $data['request_string']
+            ];
+        } else {
+            throw new \Exception("Unsupported adaptor (" . $adaptor . ")");
+        }
+        return $params;
     }
 
     public function configInfo()

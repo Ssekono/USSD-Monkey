@@ -14,6 +14,7 @@ $config = [
     "error_title" => "Error Occurred",
     "error_message" => "Something went wrong. Please try again later",
     "disabled_func" => [],
+    "adaptor" => null,
     "request_variables" => [
         "session_id" => "sessionId",
         "service_code" => "serviceCode",
