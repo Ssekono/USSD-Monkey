@@ -26,10 +26,14 @@ Then, instantiate the USSD Monkey class and call the `push` method to render the
 
 ```php
 $ussd = new USSDMonkey($config);
+$params = $ussd->get_request_params();
 $ussd->push($params, $menu);
 ```
 
+The `get_request_params` method takes one optional argument: a USSD gateway (such as AfricasTalking, TrueAfrica, DMark or UConnect) to automatically adopt the request parameters.
+
 The `push` method takes two arguments: the parameters sent by your USSD gateway (such as session ID, service code, phone number, and request string) and the default menu to display.
+
 
 #### Configuration
 
@@ -48,6 +52,7 @@ The package comes with default configuration settings, but you can override them
 - `error_title`: Set the title for error messages.
 - `error_message`: Set the default error message.
 - `disabled_func`: List any disabled functions from your project to be marked as suspended during USSD usage.
+- `adaptor`: Easily adapt your application's requests and responses to selected USSD gateways. Accepted value: "AfricasTalking", "TrueAfrica", "DMark" or "UConnect".
 - `request_variables`: Map request variables to their corresponding names as sent by the USSD Gateway provider (session id, service code, phone number, request string).
 - `redis`: Configuration settings for Redis.
 
@@ -76,8 +81,8 @@ $config = [
     // Override other configuration options as needed
 ];
 
-$params = $_POST;
 $ussd = new USSDMonkey($config);
+$params = $ussd->get_request_params();
 $ussd->push($params, 'default_menu');
 ```
 
