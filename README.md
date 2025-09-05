@@ -30,7 +30,7 @@ $params = $ussd->get_request_params();
 $ussd->push($params, $menu);
 ```
 
-The `get_request_params` method takes one optional argument: a USSD gateway (such as AfricasTalking, TrueAfrica, DMark or UConnect) to automatically adopt the request parameters.
+The `get_request_params` method accepts an optional USSD gateway name (e.g., `AfricasTalking`, `TrueAfrica`, `DMark`, or `UConnect`). This argument automatically adapts the request parameters for the specified gateway. If you omit this argument, the method will use the gateway configured in the `adaptor` attribute. If no adaptor is set, it will fall back to the default `request_variables`.
 
 The `push` method takes two arguments: the parameters sent by your USSD gateway (such as session ID, service code, phone number, and request string) and the default menu to display.
 
