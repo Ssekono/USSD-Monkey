@@ -490,9 +490,9 @@ class USSDMonkey
                 'text' => $data['ussdRequestString']
             ];
         } elseif ($adaptor == 'UConnect') {
-            // $data = file_get_contents('php://input');
-            // $data = json_decode($data, TRUE);
-            $data = $_POST;
+            $data = file_get_contents('php://input');
+            $data = json_decode($data, TRUE);
+            // $data = $_POST;
             $params = [
                 'sessionId' => $data['session_id'],
                 'serviceCode' => '*260#',
