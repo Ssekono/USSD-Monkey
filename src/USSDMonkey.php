@@ -253,41 +253,40 @@ class USSDMonkey
         $separator = $this->ussdConfig['menu_items_separator'];
         $menu_items = explode($separator, $display);
 
-        // Limit number of displayed menu items
-        if (!is_null($menu_items_displayed) && $menu_items_displayed > 0) {
-
-            if ($ussd_session = json_decode($this->redis->get('ussd_session_' . $this->sessionId), true)) {
-                $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
-                if (isset($ussd_session['nav'])) {
-                    print_r($ussd_session['nav']);
-                }
-            }
-
-            $sliced_menu_items = array_slice($menu_items, 0, $menu_items_displayed);
-            // Append navigation menu options to menu
-            if (count($menu_items) > $menu_items_displayed) {
-                $sliced_menu_items[] = $this->ussdConfig['nav_next'] . '. Next';
-            }
-            $menu_items = $sliced_menu_items;
+        // 1. Fetch and decode session once (optimized)
+        $sessionKey = 'ussd_session_' . $this->sessionId;
+        $ussd_session = json_decode($this->redis->get($sessionKey) ?? '[]', true);
+        if (!empty($ussd_session)) {
+            $this->redis->expire($sessionKey, 20);
         }
 
-        // Add a back navigation menu item
-        if ($ussd_session = json_decode($this->redis->get('ussd_session_' . $this->sessionId), true)) {
-            $this->redis->expire('ussd_session_' . $this->sessionId, 20); // expire in 20 seconds
-            if (isset($ussd_session['pattern']) && !empty($ussd_session['pattern'])) {
-                $menu_items[] = $this->ussdConfig['nav_prev'] . '. Back';
+        // 2. Handle Pagination (Next)
+        if ($menu_items_displayed > 0 && count($menu_items) > $menu_items_displayed) {
+            $menu_items = array_slice($menu_items, 0, $menu_items_displayed);
+            $menu_items[] = $this->ussdConfig['nav_next'] . '. Next';
+
+            if (isset($ussd_session['nav'])) {
+                // Log/Debug navigation if needed
+                error_log(json_encode($ussd_session['nav']));
             }
         }
 
-        $response = is_null($menu_title) ? '' : $menu_title . PHP_EOL;
-        foreach ($menu_items as $menu_item) {
-            if (is_null($this->ussdConfig['chars_per_line'])) {
-                $response .= trim($menu_item) . PHP_EOL;
-            } else {
-                $response .= trim(substr($menu_item, 0, $this->ussdConfig['chars_per_line'])) . PHP_EOL;
-            }
+        // 3. Handle Back Navigation
+        if (!empty($ussd_session['pattern'])) {
+            $menu_items[] = $this->ussdConfig['nav_prev'] . '. Back';
         }
-        return $response;
+
+        // 4. Build Response String
+        $response = $menu_title ? $menu_title . PHP_EOL : '';
+        $charLimit = $this->ussdConfig['chars_per_line'];
+
+        foreach ($menu_items as $item) {
+            $trimmed = trim($item);
+            $line = $charLimit ? substr($trimmed, 0, $charLimit) : $trimmed;
+            $response .= $line . PHP_EOL;
+        }
+
+        return rtrim($response); // Clean up trailing newline
     }
 
     /**
