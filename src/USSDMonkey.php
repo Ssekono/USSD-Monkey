@@ -179,21 +179,43 @@ class USSDMonkey
             }
             $this->render($response, $continue_session);
         } catch (\Exception $e) {
-            // Delete session data
+            // 1. Construct the log message
+            $logMessage = sprintf(
+                "[%s] USSD Error | Session: %s | Message: %s | File: %s:%d\n",
+                date('Y-m-d H:i:s'),
+                $this->sessionId,
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine()
+            );
+
+            // 2. Log to custom file if path exists, otherwise fallback to system log
+            $logPath = $this->ussdConfig['error_log_path'] ?? null;
+            if ($logPath) {
+                error_log($logMessage, 3, $logPath);
+            } else {
+                error_log($logMessage); // Default PHP error log
+            }
+
+            // 3. Cleanup Redis Session
             $this->redis->del('ussd_session_' . $this->sessionId);
-            // Display error
-            if ($this->ussdConfig['environment'] == 'production') {
-                $menu_title = $this->ussdConfig['error_title'];
-                $display = $this->ussdConfig['error_message'];
-                $menu_items_displayed = null;
-                $response = $this->menu_builder($display, $menu_title, $menu_items_displayed);
-                $continue_session = false;
-                $this->render($response, $continue_session);
-            } elseif ($this->ussdConfig['environment'] == 'development') {
-                print_r($e);
+
+            // 4. Handle Environment Display
+            $env = $this->ussdConfig['environment'] ?? 'production';
+            if ($env === 'production') {
+                $response = $this->menu_builder(
+                    $this->ussdConfig['error_message'],
+                    $this->ussdConfig['error_title'],
+                    null
+                );
+                $this->render($response, false);
+            } elseif ($env === 'development') {
+                header('Content-Type: text/plain');
+                echo "Exception: " . $e->getMessage() . "\n" . $e->getTraceAsString();
                 exit;
             } else {
-                echo "Error cannot be displayed; Unsupported environment (" . $this->ussdConfig['environment'] . ")";
+                echo "END Error: Unsupported environment (" . htmlspecialchars($env) . ")";
+                exit;
             }
         }
     }
