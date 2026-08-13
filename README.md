@@ -1,98 +1,96 @@
 ### USSD Monkey
 
-The USSD Monkey package is designed to help developers quickly build USSD applications by defining their menu flow in a JSON file. This README.md file provides documentation on how to use the package effectively. This package uses Redis to temporarily store session information.
+USSD Monkey is a small, gateway-agnostic engine for building multi-turn USSD applications from a single JSON menu file. It normalizes requests from different USSD gateways (Africa's Talking, UConnect, DMark, TrueAfrican, or your own) behind a common adapter interface, and uses Redis to track each caller's position in the menu between requests.
 
 #### Installation
-
-To install the USSD Monkey package, you can use Composer:
 
 ```bash
 composer require gantry-motion/ussd-monkey
 ```
 
-#### Usage
+Requires a reachable Redis instance (via `predis/predis`).
 
-After installing the package, you need to configure it by providing the path to your USSD menu JSON file and specifying a custom class namespace if needed. Here's an example configuration:
-
-```php
-$config = [
-    'environment' => 'development',
-    'ussd_menu_file' => ROOTPATH . 'ussdMenu.json',
-    'custom_class_namespace' => 'App\Controllers\USSD'
-];
-```
-
-Then, instantiate the USSD Monkey class and call the `push` method to render the content of your application menu:
-
-```php
-$ussd = new USSDMonkey($config);
-$params = $ussd->get_request_params();
-$ussd->push($params, $menu);
-```
-
-The `get_request_params` method accepts an optional USSD gateway name (e.g., `AfricasTalking`, `TrueAfrica`, `DMark`, or `UConnect`). This argument automatically adapts the request parameters for the specified gateway. If you omit this argument, the method will use the gateway configured in the `adaptor` attribute. If no adaptor is set, it will fall back to the default `request_variables`.
-
-The `push` method takes two arguments: the parameters sent by your USSD gateway (such as session ID, service code, phone number, and request string) and the default menu to display.
-
-
-#### Configuration
-
-The package comes with default configuration settings, but you can override them as needed. Here are some of the key configuration options:
-
-- `environment`: Set the environment to "production" or "development".
-- `input_format`: Define the input format. Accepted value: "chained".
-- `output_format`: Determine the output format. Accepted values: "conend" or "json".
-- `enable_chained_input`: Enable or disable chained input if supported by the USSD gateway provider. Accepted values: "true" or "false".
-- `enable_back_and_forth_menu_nav`: Enable or disable back and forth menu navigation. Accepted values: "true" or "false".
-- `chars_per_line`: Specify the number of characters per line.
-- `menu_items_separator`: Define the separator for menu items (| or ,).
-- `nav_next`: Define the navigation string for moving to the next menu.
-- `nav_prev`: Define the navigation string for moving to the previous menu.
-- `sanitizePhoneNumber`: Enable or disable phone number sanitization. Accepted values: "true" or "false".
-- `error_title`: Set the title for error messages.
-- `error_message`: Set the default error message.
-- `disabled_func`: List any disabled functions from your project to be marked as suspended during USSD usage.
-- `adaptor`: Easily adapt your application's requests and responses to selected USSD gateways. Accepted value: "AfricasTalking", "TrueAfrica", "DMark" or "UConnect".
-- `request_variables`: Map request variables to their corresponding names as sent by the USSD Gateway provider (session id, service code, phone number, request string).
-- `redis`: Configuration settings for Redis.
-
-You can override these settings by providing a custom configuration array when instantiating the USSD Monkey class.
-
-To view the configuration that USSD Monkey will use, you can utilize the `configInfo()` function provided by the package. Here's how you can use it:
-
-```php
-$ussd = new USSDMonkey($config);
-$current_config = $ussd->configInfo();
-echo json_encode($current_config);
-```
-
-This code will output a JSON representation of the current configuration settings that USSD Monkey will use for your USSD application. You can then inspect these settings to ensure they align with your requirements.
-
-#### Example
-
-Here's an example of how you might instantiate the USSD Monkey class with custom configuration:
+#### Quick Start
 
 ```php
 use GantryMotion\USSDMonkey\USSDMonkey;
 
-$config = [
-    'ussd_menu_file' => 'path/to/ussdMenu.json',
-    'custom_class_namespace' => 'App\Controllers\USSD',
-    // Override other configuration options as needed
-];
+class USSDController
+{
+    private $ussd;
 
-$ussd = new USSDMonkey($config);
-$params = $ussd->get_request_params();
-$ussd->push($params, 'default_menu');
+    public function __construct()
+    {
+        $this->ussd = new USSDMonkey([
+            'ussd_menu_file' => ROOTPATH . 'ussdMenu.json',
+            'sanitization' => [
+                'enabled' => true,
+                'country_code' => '256',
+                'local_number_length' => 9,
+            ],
+        ], $this); // $this is the handler: the object whose methods execute_func names call
+    }
+
+    public function index()
+    {
+        // Which gateways this endpoint accepts, checked in order
+        $this->ussd->setAdapters(['africastalking', 'uconnect']);
+
+        try {
+            $response = $this->ussd->run($this->request->getPost(), 'default_menu');
+
+            return $this->response
+                ->setContentType($this->ussd->getContentType()) // adapter decides plain/JSON/XML
+                ->setBody($response);
+        } catch (\Exception $e) {
+            log_message('error', '[USSD Error] ' . $e->getMessage());
+            return $this->response->setStatusCode(400)->setBody('Service unavailable.');
+        }
+    }
+
+    // Called when a menu node's "execute_func" matches this method name
+    public function say_hello($path, $ussd)
+    {
+        $name = end($path);
+        return "Hello $name";
+    }
+}
 ```
 
-Below is an example of the `ussdMenu.json` file structure:
+`USSDMonkey`'s constructor takes two arguments: your config array (merged over the library defaults) and a **handler instance** — typically your controller (`$this`) — whose public methods are invoked by name whenever the menu hits an `execute_func`.
+
+`setAdapters()` activates one or more of the keys registered under `available_adapters` (see Configuration below) and tries them in order against each incoming request; the first one whose `validate()` matches wins. `run()` then parses the request, resolves the caller's position via Redis, and returns the rendered response body already formatted for that gateway.
+
+#### The Handler Contract
+
+Every `execute_func` referenced in your menu JSON must exist as a public method on the handler instance you pass to the constructor, with the signature:
+
+```php
+public function my_func(array $path, USSDMonkey $ussd)
+{
+    // $path is the breadcrumb of every input entered so far in this session,
+    // e.g. ['customer_menu', '1', '3', '2']
+    // $ussd->session_data has sessionId, phoneNumber, text, and adapter (the resolved adapter's getName())
+}
+```
+
+The return value controls what happens next:
+
+| Return value | Effect |
+|---|---|
+| `string` | Replaces the current menu node's `display` text and continues rendering normally |
+| `false` | Re-renders the last screen prefixed with a generic "Invalid Input." notice |
+| `$ussd->retry($msg)` | Re-renders the last screen prefixed with your own custom message instead of the generic one |
+| `$ussd->terminate($msg)` | Ends the session with `$msg` as the final screen |
+
+Every unimplemented `execute_func` referenced by your menu JSON will fatal with a PHP `\Error` (undefined method) rather than a catchable `\Exception` — make sure every `execute_func` in your menu has a matching handler method before going live.
+
+#### `ussdMenu.json` Format
 
 ```json
 {
     "default_menu": {
-        "menu_title": "USSD Monkey",
-        "display": "1. Say Hello |2. Say Goodbye |3. Say Good Night",
+        "display": "1. Say Hello|2. Say Goodbye",
         "options": {
             "1": {
                 "display": "Enter a name",
@@ -102,94 +100,79 @@ Below is an example of the `ussdMenu.json` file structure:
                 }
             },
             "2": {
-                "display": "Enter a name",
-                "options": {
-                    "display": "_EXECUTE_",
-                    "execute_func": "get_people_titles",
-                    "options": {
-                        "display": "_EXECUTE_",
-                        "execute_func": "say_goodbye"
-                    }
-                }
-            },
-            "3": {
-                "display": "Enter a name",
-                "options": {
-                    "display": "1. Wish sweet dream |2. Let bedbugs not bite",
-                    "options": {
-                        "1": {
-                            "display": "_EXECUTE_",
-                            "execute_func": "say_goodnight_sweet_dreams"
-                        },
-                        "2": {
-                            "display": "_EXECUTE_",
-                            "execute_func": "say_goodnight_bedbugs_dont_bite"
-                        }
-                    }
-                }
+                "display": "_EXECUTE_",
+                "execute_func": "say_goodbye"
             }
         }
     }
 }
 ```
 
-This JSON structure defines the menu options for your USSD application. Each menu item has a display label and, optionally, an associated action to execute (`_EXECUTE_`). The structure supports nested options for creating multi-level menus. Ensure your `ussdMenu.json` file adheres to this format to work correctly with USSD Monkey.
+- Each menu key is a valid `entryMenu` you can pass to `run()`.
+- `options` maps a user's numeric input to the next node; a node with `options` but no matching key is treated as free-text capture (e.g. collecting a name or quantity).
+- A node with `"display": "_EXECUTE_"` calls its `execute_func` on the handler instead of rendering static text.
+- `menu_items_separator` (default `|`) splits a `display` string into lines; long menus are paginated automatically per `items_per_page`, with `nav_next`/`nav_prev` inputs (default `0`/`00`) moving between pages or back up the menu tree.
 
-Below is an example of the `USSD` PHP class containing custom methods for your USSD application:
+#### Configuration
+
+Passed as the first constructor argument and merged recursively over the library defaults (`config/default.php`):
+
+| Key | Default | Purpose |
+|---|---|---|
+| `ussd_menu_file` | `null` (required) | Absolute path to your `ussdMenu.json` |
+| `available_adapters` | the 4 built-in adapters | Map of adapter key → class name; add your own or override a built-in one here |
+| `session_ttl` | `180` | Seconds a session's Redis keys survive since the last request. Refreshed on every request while the session is active, so it only expires idle sessions |
+| `items_per_page` | `6` | Lines per page before pagination kicks in |
+| `menu_items_separator` | `\|` | Separator splitting a `display` string into lines |
+| `nav_next` / `nav_prev` | `0` / `00` | Inputs reserved for next-page / previous-page-or-back navigation |
+| `sanitization.enabled` | `true` | Whether incoming phone numbers are normalized |
+| `sanitization.country_code` | `256` | Prepended to the sanitized local number. Assumes a single-country deployment — don't enable this if you accept international numbers |
+| `sanitization.local_number_length` | `9` | Digits kept from the end of the raw number before prepending `country_code` |
+| `redis` | `{scheme: tcp, host: 127.0.0.1, port: 6379}` | Passed straight through to `Predis\Client` |
+| `chars_per_line` | `null` (disabled) | When set, wraps any single display line exceeding this width onto additional lines before pagination is applied |
+
+#### Writing a Custom Adapter
+
+Implement `GantryMotion\USSDMonkey\Adapters\AdapterInterface`:
 
 ```php
-namespace App\Controllers;
+use GantryMotion\USSDMonkey\Adapters\AdapterInterface;
 
-class USSD
+class MyGatewayAdapter implements AdapterInterface
 {
-    public function say_hello($data)
+    public function validate(array $data): bool
     {
-        $name = $data[1];
-        $display = "Hello " . $name;
-        return $display;
+        return !empty($data['session_id']) && !empty($data['phone_number']);
     }
 
-    public function get_people_titles($data)
+    public function parseRequest(array $data): array
     {
-        $titles = ["1" => "Mr", "2" => "Mrs", "3" => "Ms", "4" => "Dr"];
-
-        $title_list = [];
-        foreach ($titles as $key => $value) {
-            $title_list[] = $key . ' ' . $value;
-        }
-        $display = "Select Title" . PHP_EOL;
-        $display .= implode('|', $title_list);
-        return $display;
+        return [
+            'sessionId'   => $data['session_id'],
+            'phoneNumber' => $data['phone_number'],
+            'text'        => $data['request_string'] ?? '',
+        ];
     }
 
-    public function say_goodbye($data)
+    public function formatResponse(string $message, bool $isTerminal): mixed
     {
-        $name = $data[1];
-        $index = $data[2];
-
-        $titles = ["1" => "Mr", "2" => "Mrs", "3" => "Ms", "4" => "Dr"];
-
-        $display = "Goodbye " . $titles[$index] . " " . $name;
-        return $display;
+        return json_encode(['response' => $message, 'end' => $isTerminal]);
     }
 
-    public function say_goodnight_sweet_dreams($data)
+    public function getName(): string
     {
-        $name = $data[1];
-        $display = "Good night " . $name . ", and sweet dreams";
-        return $display;
+        return 'my_gateway'; // unique — used to partition Redis session keys per gateway
     }
 
-    public function say_goodnight_bedbugs_dont_bite($data)
+    public function getContentType(): string
     {
-        $name = $data[1];
-        $display = "Good night " . $name . ", and don't let the bedbugs bite";
-        return $display;
+        return 'application/json';
     }
 }
 ```
 
-This `USSD` class contains methods that correspond to the actions defined in your `ussdMenu.json` file. These methods process the data received from the USSD menu and return appropriate responses. Ensure that the namespace and class name match the ones specified in your configuration.
+Register it under `available_adapters` with a unique key and pass that key to `setAdapters()`. Don't call PHP's `header()` inside `formatResponse()` — return the content type from `getContentType()` instead and let the calling app set it on its own response object via `$ussd->getContentType()`. This keeps the package framework-agnostic and avoids header ordering issues with frameworks (like CodeIgniter) that manage their own response object.
 
+#### Versioning Note
 
-That's it! You're now ready to use the USSD Monkey package to build your USSD applications.
+`AdapterInterface` requires `getContentType()` as of `2.0.0`. If you're upgrading from `1.x` with a custom adapter, add that method before updating — otherwise your adapter will fatal with a "must implement" error.
